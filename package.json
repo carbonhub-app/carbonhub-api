@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "",
   "license": "MIT",
-  "author": "CarbonHub Developers <dev@carbonhub.app>",
+  "author": "CarbonHub Developers <dev@carbonhub.faizath.com>",
   "type": "commonjs",
   "main": "app/index.js",
   "scripts": {

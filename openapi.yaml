@@ -4,7 +4,7 @@ info:
   description: Decentralized Integrated Carbon Trading Solution
   version: 1.0.0
 servers:
-  - url: https://api.carbonhub.app
+  - url: https://carbonhub-api.faizath.com
     description: Production Server
   - url: http://localhost:8080
     description: Local Development Server

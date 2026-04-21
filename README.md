@@ -1,3 +1,20 @@
+<div align="center">
+  <table border="1">
+    <tr>
+      <td align="center" style="padding: 20px;">
+        <h3>📢 Domain & Email Migration Notice</h3>
+        <p>Since <b>19 March 2026</b>, Carbonhub has transitioned to new domains as <code>carbonhub.app</code> was not renewed:</p>
+        <p>🌐 <b>Website:</b> <a href="https://carbonhub.faizath.com">carbonhub.faizath.com</a> (formerly <i>carbonhub.app</i>)<br>
+        ⚙️ <b>API:</b> <a href="https://carbonhub-api.faizath.com">carbonhub-api.faizath.com</a> (formerly <i>api.carbonhub.app</i>)<br>
+        📧 <b>Email:</b> <a href="mailto:contact@carbonhub.faizath.com">contact@carbonhub.faizath.com</a> (formerly <i>contact@carbonhub.app</i>)<br>
+        🛰️ <b>CDN:</b> <a>carbonhub-cdn.faizath.com</a> (formerly <i>cdn.carbonhub.app</i>)<br>
+        📈 <b>Status Pages:</b> <a href="https://status.faizath.com/status/carbonhub">https://status.faizath.com/status/carbonhub</a> (formerly <i>status.carbonhub.app</i>)
+        </p>
+      </td>
+    </tr>
+  </table>
+</div>
+
 # CarbonHub Core
 
 A decentralized integrated carbon trading solution built on the Solana blockchain. CarbonHub Core provides a robust API for managing carbon credits, emissions tracking, and token swaps between different carbon credit types.
