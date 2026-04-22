@@ -1,13 +1,7 @@
-const web3 = require('@solana/web3.js');
-const { createTransferInstruction, createAssociatedTokenAccountInstruction, getAssociatedTokenAddress, getAccount } = require('@solana/spl-token');
-const bs58 = require('bs58');
-const yahooFinance = require('yahoo-finance2').default;
-const ECFCHMinter = require('../../utils/web3/ECFCH_minter');
-const EURCHMinter = require('../../utils/web3/EURCH_minter');
-
 // Helper to get exchange rate from Yahoo Finance
 async function getExchangeRate() {
     try {
+        const { default: yahooFinance } = await import('yahoo-finance2');
         const quote = await yahooFinance.quote('ECF=F');
         return quote.regularMarketPrice;
     } catch (error) {
@@ -16,13 +10,32 @@ async function getExchangeRate() {
     }
 }
 
+// Lazy-load all @solana/* modules to prevent them from corrupting the
+// MongoDB driver's TCP stack at startup (web3.js modifies global fetch/HTTP agents).
+function getSolanaEnv() {
+    const web3 = require('@solana/web3.js');
+    const { createTransferInstruction, createAssociatedTokenAccountInstruction, getAssociatedTokenAddress, getAccount } = require('@solana/spl-token');
+    const bs58 = require('bs58');
+    return {
+        web3,
+        createTransferInstruction,
+        createAssociatedTokenAccountInstruction,
+        getAssociatedTokenAddress,
+        getAccount,
+        bs58,
+        ECFCH_PUBLIC_KEY: new web3.PublicKey(process.env.ECFCH_PUBLIC_KEY),
+        ECFCH_PRIVATE_KEY: bs58.default.decode(process.env.ECFCH_PRIVATE_KEY),
+        EURCH_PUBLIC_KEY: new web3.PublicKey(process.env.EURCH_PUBLIC_KEY),
+        EURCH_PRIVATE_KEY: bs58.default.decode(process.env.EURCH_PRIVATE_KEY),
+    };
+}
+
 // Helper to try multiple RPC URLs
-async function getWorkingSolanaConnection(urls) {
+async function getWorkingSolanaConnection(web3, urls) {
     let rpcUrlIdx = 0;
     while (rpcUrlIdx < urls.length) {
         try {
             const connection = new web3.Connection(urls[rpcUrlIdx], 'confirmed');
-            // Try a simple call to check if the connection works
             await connection.getEpochInfo();
             return connection;
         } catch (e) {
@@ -33,35 +46,18 @@ async function getWorkingSolanaConnection(urls) {
     throw new Error('No working Solana RPC URL found');
 }
 
-// Token configurations
-const ECFCH_PUBLIC_KEY = new web3.PublicKey(process.env.ECFCH_PUBLIC_KEY);
-const ECFCH_PRIVATE_KEY = bs58.default.decode(process.env.ECFCH_PRIVATE_KEY);
-const EURCH_PUBLIC_KEY = new web3.PublicKey(process.env.EURCH_PUBLIC_KEY);
-const EURCH_PRIVATE_KEY = bs58.default.decode(process.env.EURCH_PRIVATE_KEY);
-
 // Calculate swap amount using real-time exchange rate
 const calculateSwapAmount = async (fromToken, amount) => {
     console.log('Input values:', { fromToken, amount });
-    
     const exchangeRate = await getExchangeRate();
     console.log('Exchange rate:', exchangeRate);
-    
     const rawAmount = fromToken === 'ECFCH' ? amount * exchangeRate : amount / exchangeRate;
-    console.log('Raw amount after exchange rate calculation:', rawAmount);
-    
-    // Use decimals of the target token (ECFCH: 3 decimals, EURCH: 6 decimals)
     const targetToken = fromToken === 'ECFCH' ? 'EURCH' : 'ECFCH';
     const decimals = targetToken === 'ECFCH' ? 3 : 6;
     const multiplier = Math.pow(10, decimals);
-    console.log('Decimal conversion:', { targetToken, decimals, multiplier });
-    
-    // Round to appropriate decimals and convert to integer
     const roundedAmount = Math.round(rawAmount * multiplier) / multiplier;
-    console.log('Rounded amount:', roundedAmount);
-    
     const finalAmount = Math.floor(roundedAmount * multiplier);
     console.log('Final integer amount:', finalAmount);
-    
     return finalAmount;
 };
 
@@ -81,13 +77,14 @@ const create = async (req, res) => {
             });
         }
 
+        const { web3, createTransferInstruction, createAssociatedTokenAccountInstruction, getAssociatedTokenAddress, getAccount, bs58, ECFCH_PUBLIC_KEY, ECFCH_PRIVATE_KEY, EURCH_PUBLIC_KEY, EURCH_PRIVATE_KEY } = getSolanaEnv();
+
         // Load RPC URLs from env
         const SOLANA_DEVNET_RPC = JSON.parse(process.env.DEVNET_RPC_URLS);
         const SOLANA_MAINNET_RPC = JSON.parse(process.env.MAINNET_RPC_URLS);
         const RPC_URL_LIST = process.env.SOLANA_NETWORK === "devnet" ? SOLANA_DEVNET_RPC : SOLANA_MAINNET_RPC;
-        
-        // Try each RPC URL in order
-        const connection = await getWorkingSolanaConnection(RPC_URL_LIST);
+
+        const connection = await getWorkingSolanaConnection(web3, RPC_URL_LIST);
 
         const userPubKey = new web3.PublicKey(userPublicKey);
         const fromTokenMint = fromToken === 'ECFCH' ? ECFCH_PUBLIC_KEY : EURCH_PUBLIC_KEY;
@@ -95,11 +92,9 @@ const create = async (req, res) => {
         const fromTokenKeypair = fromToken === 'ECFCH' ? ECFCH_PRIVATE_KEY : EURCH_PRIVATE_KEY;
         const toTokenKeypair = fromToken === 'ECFCH' ? EURCH_PRIVATE_KEY : ECFCH_PRIVATE_KEY;
 
-        // Create keypairs
         const fromKeypair = web3.Keypair.fromSecretKey(fromTokenKeypair);
         const toKeypair = web3.Keypair.fromSecretKey(toTokenKeypair);
 
-        // Load Carbonhub authority keypair
         const carbonhubPrivateKey = bs58.default.decode(process.env.SOLANA_PRIVATE_KEY);
         const carbonhubKeypair = web3.Keypair.fromSecretKey(carbonhubPrivateKey);
 
@@ -112,7 +107,6 @@ const create = async (req, res) => {
             carbonhubAuthority: carbonhubKeypair.publicKey.toBase58()
         });
 
-        // Get associated token addresses
         const userFromTokenAddress = await getAssociatedTokenAddress(
             fromTokenMint,
             userPubKey
@@ -132,7 +126,7 @@ const create = async (req, res) => {
         try {
             const userTokenAccount = await getAccount(connection, userFromTokenAddress);
             console.log('User token account balance:', userTokenAccount.amount.toString());
-            
+
             const requiredAmount = amount * (fromToken === 'ECFCH' ? 10 ** 3 : 10 ** 6);
             if (BigInt(userTokenAccount.amount) < BigInt(requiredAmount)) {
                 return res.status(400).json({
@@ -163,19 +157,16 @@ const create = async (req, res) => {
             needsCarbonhubAccount = true;
         }
 
-        // Calculate swap amount using real-time exchange rate
         const swapAmount = await calculateSwapAmount(fromToken, amount);
         const transferAmount = amount * (fromToken === 'ECFCH' ? 10 ** 3 : 10 ** 6);
 
-        // Create transfer transaction
         const transferTransaction = new web3.Transaction();
 
-        // If Carbonhub account doesn't exist, create it first
         if (needsCarbonhubAccount) {
             console.log('Adding create Carbonhub account instruction');
             transferTransaction.add(
                 createAssociatedTokenAccountInstruction(
-                    carbonhubKeypair.publicKey, // payer is Carbonhub authority
+                    carbonhubKeypair.publicKey,
                     carbonhubFromTokenAddress,
                     carbonhubKeypair.publicKey,
                     fromTokenMint
@@ -189,7 +180,6 @@ const create = async (req, res) => {
             amount: transferAmount
         });
 
-        // Add transfer instruction to send tokens to Carbonhub authority
         transferTransaction.add(
             createTransferInstruction(
                 userFromTokenAddress,
@@ -199,17 +189,14 @@ const create = async (req, res) => {
             )
         );
 
-        // Get recent blockhash
         const { blockhash } = await connection.getLatestBlockhash();
         transferTransaction.recentBlockhash = blockhash;
         transferTransaction.feePayer = userPubKey;
 
-        // If we need to create the Carbonhub account, we need to sign with Carbonhub authority first
         if (needsCarbonhubAccount) {
             transferTransaction.partialSign(carbonhubKeypair);
         }
 
-        // Serialize transaction
         const serializedTransaction = transferTransaction.serializeMessage().toString('base64');
 
         res.status(200).json({
@@ -217,7 +204,7 @@ const create = async (req, res) => {
             message: "Successfully create swap",
             data: {
                 transaction: serializedTransaction,
-                swapAmount: swapAmount / (fromToken === 'ECFCH' ? 10 ** 6 : 10 ** 3), // Convert back to human-readable format
+                swapAmount: swapAmount / (fromToken === 'ECFCH' ? 10 ** 6 : 10 ** 3),
                 fromToken,
                 toToken: fromToken === 'ECFCH' ? 'EURCH' : 'ECFCH',
                 needsCarbonhubAccount
@@ -249,15 +236,16 @@ const execute = async (req, res) => {
             });
         }
 
-        // Load RPC URLs from env
+        const { web3 } = getSolanaEnv();
+        const ECFCHMinter = require('../../utils/web3/ECFCH_minter');
+        const EURCHMinter = require('../../utils/web3/EURCH_minter');
+
         const SOLANA_DEVNET_RPC = JSON.parse(process.env.DEVNET_RPC_URLS);
         const SOLANA_MAINNET_RPC = JSON.parse(process.env.MAINNET_RPC_URLS);
         const RPC_URL_LIST = process.env.SOLANA_NETWORK === "devnet" ? SOLANA_DEVNET_RPC : SOLANA_MAINNET_RPC;
-        
-        // Try each RPC URL in order
-        const connection = await getWorkingSolanaConnection(RPC_URL_LIST);
 
-        // Deserialize the transaction that was signed by the user
+        const connection = await getWorkingSolanaConnection(web3, RPC_URL_LIST);
+
         const transaction = web3.Transaction.from(
             Buffer.from(signedTransaction, 'base64')
         );
@@ -269,7 +257,6 @@ const execute = async (req, res) => {
             amount
         });
 
-        // Verify the transaction was signed by the user
         if (!transaction.signatures.some(sig => sig.publicKey.equals(transaction.feePayer))) {
             return res.status(400).json({
                 status: 'error',
@@ -278,7 +265,6 @@ const execute = async (req, res) => {
             });
         }
 
-        // Send the transaction as is (already signed by user and Carbonhub authority if needed)
         const signature = await connection.sendRawTransaction(transaction.serialize());
         console.log('Transaction sent:', signature);
 
@@ -297,10 +283,8 @@ const execute = async (req, res) => {
             throw error;
         }
 
-        // Calculate swap amount using real-time exchange rate
         const swapAmount = await calculateSwapAmount(fromToken, amount);
 
-        // Mint the swapped tokens
         let mintResult;
         if (fromToken === 'ECFCH') {
             mintResult = await EURCHMinter.mint(transaction.feePayer.toBase58(), swapAmount);
@@ -340,13 +324,13 @@ const balance = async (req, res) => {
             });
         }
 
-        // Load RPC URLs from env
+        const { web3, getAssociatedTokenAddress, getAccount, ECFCH_PUBLIC_KEY, EURCH_PUBLIC_KEY } = getSolanaEnv();
+
         const SOLANA_DEVNET_RPC = JSON.parse(process.env.DEVNET_RPC_URLS);
         const SOLANA_MAINNET_RPC = JSON.parse(process.env.MAINNET_RPC_URLS);
         const RPC_URL_LIST = process.env.SOLANA_NETWORK === "devnet" ? SOLANA_DEVNET_RPC : SOLANA_MAINNET_RPC;
-        
-        // Try each RPC URL in order
-        const connection = await getWorkingSolanaConnection(RPC_URL_LIST);
+
+        const connection = await getWorkingSolanaConnection(web3, RPC_URL_LIST);
 
         const userPubKey = new web3.PublicKey(userPublicKey);
 
@@ -356,37 +340,27 @@ const balance = async (req, res) => {
             EURCHMint: EURCH_PUBLIC_KEY.toBase58()
         });
 
-        // Get associated token addresses
-        const userECFCHAddress = await getAssociatedTokenAddress(
-            ECFCH_PUBLIC_KEY,
-            userPubKey
-        );
-
-        const userEURCHAddress = await getAssociatedTokenAddress(
-            EURCH_PUBLIC_KEY,
-            userPubKey
-        );
+        const userECFCHAddress = await getAssociatedTokenAddress(ECFCH_PUBLIC_KEY, userPubKey);
+        const userEURCHAddress = await getAssociatedTokenAddress(EURCH_PUBLIC_KEY, userPubKey);
 
         console.log('Token accounts:', {
             userECFCHAddress: userECFCHAddress.toBase58(),
             userEURCHAddress: userEURCHAddress.toBase58()
         });
 
-        // Get ECFCH balance
         let ecfchBalance = 0;
         try {
             const ecfchAccount = await getAccount(connection, userECFCHAddress);
-            ecfchBalance = Number(ecfchAccount.amount) / (10 ** 3); // Convert from smallest unit (3 decimals)
+            ecfchBalance = Number(ecfchAccount.amount) / (10 ** 3);
             console.log('ECFCH balance:', ecfchBalance);
         } catch (error) {
             console.log('ECFCH account does not exist or error:', error.message);
         }
 
-        // Get EURCH balance
         let eurchBalance = 0;
         try {
             const eurchAccount = await getAccount(connection, userEURCHAddress);
-            eurchBalance = Number(eurchAccount.amount) / (10 ** 6); // Convert from smallest unit (6 decimals)
+            eurchBalance = Number(eurchAccount.amount) / (10 ** 6);
             console.log('EURCH balance:', eurchBalance);
         } catch (error) {
             console.log('EURCH account does not exist or error:', error.message);

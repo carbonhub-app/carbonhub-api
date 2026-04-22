@@ -1,5 +1,4 @@
 const Company = require('./emission.model').Company;
-const { mint } = require('../../utils/web3/ECFCH_minter');
 
 const CO2_MOLAR_MASS = 44; // g/mol
 const AIR_MOLAR_MASS = 29; // g/mol
@@ -173,7 +172,7 @@ const annual = async (req, res) => {
                 data: {}
             });
         }
-        
+
         const getCompany = await Company.findOne( { _id: id }, { 'emissions.annual': 1, _id: 0 } );
         if (!getCompany) {
             return res.status(400).json({
@@ -331,8 +330,8 @@ const withdraw = async (req, res) => {
                 year: item.year,
                 available_quota: DEFAULT_ANNUAL_CARBON_EMISSION_QUOTA - (item.totalTon + withdrawalSum)
             };
-        }).filter(item => { 
-            return item.year == new Date().getFullYear().toString(); 
+        }).filter(item => {
+            return item.year == new Date().getFullYear().toString();
         })[0].available_quota;
 
         if (amount > available_quota) {
@@ -351,8 +350,9 @@ const withdraw = async (req, res) => {
         await getCompany.save();
 
         // Mint ECFCH tokens to the company's public key
+        const { mint } = require('../../utils/web3/ECFCH_minter');
         const mintResult = await mint(getCompany.publicKey, amount);
-        
+
         res.status(200).json({
             status: "success",
             message: `Successfully withdraw ${amount} tonnes of carbon quota and minted the tokenized quota`,
