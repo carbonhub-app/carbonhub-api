@@ -3,7 +3,7 @@ const Auth = require('./auth.model').Auth;
 const { PublicKey } = require('@solana/web3.js');
 const crypto = require('crypto');
 const nacl = require('tweetnacl');
-const signToken = require('../../utils/auth/jwt/sign');
+const { signToken } = require('../../utils/auth/jwt/sign');
 const { randomUUID } = require('crypto');
 
 const challenge = async (req, res) => {
