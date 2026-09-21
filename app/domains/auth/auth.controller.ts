@@ -1,6 +1,5 @@
 import crypto from "node:crypto";
 import { randomUUID } from "node:crypto";
-import { PublicKey } from "@solana/web3.js";
 import nacl from "tweetnacl";
 
 import { Auth } from "./auth.model";
@@ -124,10 +123,15 @@ export const verify = async ({
       };
     }
 
+    // The address is base58; kit validates it and hands back the raw 32 bytes
+    // the signature was produced against.
+    const { address, getAddressEncoder } = await import("@solana/kit");
+    const publicKeyBytes = new Uint8Array(getAddressEncoder().encode(address(publicKey)));
+
     const isValid = nacl.sign.detached.verify(
       new TextEncoder().encode(challenge),
       Buffer.from(signature, "base64"),
-      new PublicKey(publicKey).toBytes(),
+      publicKeyBytes,
     );
 
     if (!isValid) {

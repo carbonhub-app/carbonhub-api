@@ -12,11 +12,9 @@
   },
   "dependencies": {
     "@elysiajs/cors": "^1.4.2",
-    "@metaplex-foundation/mpl-token-metadata": "^2.13.0",
     "@sinclair/typebox": "^0.34.52",
-    "@solana/spl-token": "^0.4.15",
-    "@solana/spl-token-metadata": "^0.1.6",
-    "@solana/web3.js": "^1.99.0",
+    "@solana-program/token": "^0.17.0",
+    "@solana/kit": "^8.3.0",
     "bs58": "^6.0.0",
     "elysia": "^1.4.30",
     "jsonwebtoken": "^9.0.3",
