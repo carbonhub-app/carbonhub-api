@@ -31,7 +31,8 @@ A decentralized integrated carbon trading solution built on the Solana blockchai
 
 ## 🛠 Tech Stack
 
-- **Backend Framework**: Bun with Express.js
+- **Backend Framework**: Bun with Elysia
+- **Language**: TypeScript
 - **Blockchain**: Solana
 - **Token Standards**: SPL Token
 - **Database**: MongoDB
