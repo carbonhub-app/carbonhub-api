@@ -44,8 +44,8 @@ A decentralized integrated carbon trading solution built on the Solana blockchai
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/carbonhub-app/carbonhub-core.git
-cd carbonhub-core
+git clone https://github.com/carbonhub-app/carbonhub-api.git
+cd carbonhub-api
 ```
 
 2. Install dependencies:
