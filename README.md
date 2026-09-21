@@ -31,7 +31,7 @@ A decentralized integrated carbon trading solution built on the Solana blockchai
 
 ## 🛠 Tech Stack
 
-- **Backend Framework**: Node.js with Express.js
+- **Backend Framework**: Bun with Express.js
 - **Blockchain**: Solana
 - **Token Standards**: SPL Token
 - **Database**: MongoDB
@@ -50,7 +50,7 @@ cd carbonhub-api
 
 2. Install dependencies:
 ```bash
-npm install
+bun install
 ```
 
 3. Create a `.env` file with the following variables:
@@ -62,7 +62,7 @@ SOLANA_RPC_URL=your_solana_rpc_url
 
 4. Start the development server:
 ```bash
-npm run dev
+bun run dev
 ```
 
 ## 🔑 API Endpoints
