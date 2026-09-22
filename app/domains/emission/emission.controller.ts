@@ -86,10 +86,13 @@ export const collect = async ({
       return { status: "error", message: "Invalid API key", data: {} };
     }
 
+    // Bucket in UTC: the local-time getters made the year, month and day a
+    // function of wherever the server happens to run, so the same reading
+    // landed in different buckets on different hosts.
     const d = new Date(time);
-    const year = d.getFullYear().toString();
-    const month = `${d.getFullYear()}-${("0" + (d.getMonth() + 1).toString()).slice(-2)}`;
-    const date = `${d.getFullYear()}-${("0" + (d.getMonth() + 1).toString()).slice(-2)}-${("0" + d.getDate().toString()).slice(-2)}`;
+    const year = d.getUTCFullYear().toString();
+    const month = `${year}-${("0" + (d.getUTCMonth() + 1).toString()).slice(-2)}`;
+    const date = `${month}-${("0" + d.getUTCDate().toString()).slice(-2)}`;
 
     const emissionTon = ppmToTons(ppm);
 
