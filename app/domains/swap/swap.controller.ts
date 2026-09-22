@@ -4,12 +4,11 @@ import type { Envelope, SetContext } from "../../types/http";
 import { asBody, badRequest } from "../../types/http";
 import { TOKEN_DECIMALS, type TokenSymbol } from "../../utils/web3/solana";
 
-// Helper to get exchange rate from Yahoo Finance
+// Helper to get exchange rate from Capital.com
 async function getExchangeRate(): Promise<number> {
   try {
-    const { default: yahooFinance } = await import("yahoo-finance2");
-    const quote = await yahooFinance.quote("ECF=F");
-    return quote.regularMarketPrice as number;
+    const { getCarbonPriceEur } = await import("../../utils/market/capital");
+    return await getCarbonPriceEur();
   } catch (error) {
     console.error("Error fetching exchange rate:", error);
     throw new Error("Failed to fetch exchange rate");
