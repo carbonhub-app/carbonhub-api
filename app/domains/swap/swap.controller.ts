@@ -121,6 +121,14 @@ async function verifiedTransferAmount(
   return parsed.data.amount;
 }
 
+/** What the chain knows about a signature, or null if it has never seen it. */
+async function signatureStatus(rpc: SolanaRpc, signature: Signature) {
+  const { value } = await rpc
+    .getSignatureStatuses([signature], { searchTransactionHistory: true })
+    .send();
+  return value[0] ?? null;
+}
+
 /**
  * Waits for a sent transaction to reach `confirmed` by asking the chain for its
  * status, which needs nothing from the transaction but its signature.
@@ -129,10 +137,7 @@ async function confirmSignature(rpc: SolanaRpc, signature: Signature): Promise<v
   const deadline = Date.now() + CONFIRMATION_TIMEOUT_MS;
 
   for (;;) {
-    const { value } = await rpc
-      .getSignatureStatuses([signature], { searchTransactionHistory: true })
-      .send();
-    const status = value[0];
+    const status = await signatureStatus(rpc, signature);
 
     if (status?.err) {
       throw new Error(`Transaction ${signature} failed on chain: ${JSON.stringify(status.err)}`);
@@ -419,9 +424,17 @@ export const execute = async ({
     // user's tokens and returns nothing. Confirming by signature needs no
     // lifetime at all.
     const sendTransaction = kit.sendTransactionWithoutConfirmingFactory({ rpc });
-    await sendTransaction(transaction as Parameters<typeof sendTransaction>[0], {
-      commitment: "confirmed",
-    });
+    try {
+      await sendTransaction(transaction as Parameters<typeof sendTransaction>[0], {
+        commitment: "confirmed",
+      });
+    } catch (sendError) {
+      // The network refuses a transaction it has already processed, which is
+      // exactly what a retried execute looks like. Only a signature it has
+      // never seen is a genuine send failure.
+      if (!(await signatureStatus(rpc, signature))) throw sendError;
+      console.warn(`Transaction ${signature} had already been submitted`);
+    }
     await confirmSignature(rpc, signature);
     console.log("Transaction confirmed:", signature);
 
