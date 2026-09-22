@@ -4,14 +4,42 @@ import type { Envelope, SetContext } from "../../types/http";
 import { asBody, badRequest } from "../../types/http";
 import { TOKEN_DECIMALS, type TokenSymbol } from "../../utils/web3/solana";
 
+// The carbon price moves slowly, so a short cache is plenty fresh and keeps
+// the trading page's polling well clear of Capital.com's rate limit.
+const RATE_TTL_MS = 60 * 1000;
+const FALLBACK_RATE = 80;
+
+let cachedRate: { price: number; at: number } | null = null;
+
 // Helper to get exchange rate from Capital.com
 async function getExchangeRate(): Promise<number> {
+  if (cachedRate && Date.now() - cachedRate.at < RATE_TTL_MS) {
+    return cachedRate.price;
+  }
+
   try {
     const { getCarbonPriceEur } = await import("../../utils/market/capital");
-    return await getCarbonPriceEur();
+    const price = await getCarbonPriceEur();
+    cachedRate = { price, at: Date.now() };
+    return price;
   } catch (error) {
     console.error("Error fetching exchange rate:", error);
-    throw new Error("Failed to fetch exchange rate");
+
+    // Losing the feed for a moment should not take the trading page down with
+    // it, so serve the last price we saw rather than failing the request.
+    if (cachedRate) {
+      const ageSeconds = Math.round((Date.now() - cachedRate.at) / 1000);
+      console.warn(
+        `Serving a STALE exchange rate of ${cachedRate.price} from ${ageSeconds}s ago`,
+      );
+      return cachedRate.price;
+    }
+
+    const seeded = Number(process.env.EUA_EUR_FALLBACK_PRICE) || FALLBACK_RATE;
+    console.warn(
+      `Serving a PLACEHOLDER exchange rate of ${seeded}; no live price has been fetched yet`,
+    );
+    return seeded;
   }
 }
 
