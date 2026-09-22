@@ -3,11 +3,18 @@ import type { VerificationResult } from "../../utils/auth/jwt/verify";
 import type { Envelope, SetContext } from "../../types/http";
 import { asBody, badRequest } from "../../types/http";
 import { TOKEN_DECIMALS, type TokenSymbol } from "../../utils/web3/solana";
+import type { SolanaRpc } from "../../utils/web3/solana";
+import type { Signature } from "@solana/kit";
 
 // The carbon price moves slowly, so a short cache is plenty fresh and keeps
 // the trading page's polling well clear of Capital.com's rate limit.
 const RATE_TTL_MS = 60 * 1000;
 const FALLBACK_RATE = 80;
+
+// Roughly how long a blockhash stays valid, which is as long as a transfer the
+// wallet just signed can still land.
+const CONFIRMATION_TIMEOUT_MS = 60 * 1000;
+const CONFIRMATION_POLL_MS = 1000;
 
 let cachedRate: { price: number; at: number } | null = null;
 
@@ -71,6 +78,35 @@ async function solana() {
 }
 
 const unit = (symbol: TokenSymbol) => 10 ** TOKEN_DECIMALS[symbol];
+
+/**
+ * Waits for a sent transaction to reach `confirmed` by asking the chain for its
+ * status, which needs nothing from the transaction but its signature.
+ */
+async function confirmSignature(rpc: SolanaRpc, signature: Signature): Promise<void> {
+  const deadline = Date.now() + CONFIRMATION_TIMEOUT_MS;
+
+  for (;;) {
+    const { value } = await rpc
+      .getSignatureStatuses([signature], { searchTransactionHistory: true })
+      .send();
+    const status = value[0];
+
+    if (status?.err) {
+      throw new Error(`Transaction ${signature} failed on chain: ${JSON.stringify(status.err)}`);
+    }
+    if (status?.confirmationStatus === "confirmed" || status?.confirmationStatus === "finalized") {
+      return;
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `Transaction ${signature} was not confirmed within ${CONFIRMATION_TIMEOUT_MS / 1000}s`,
+      );
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, CONFIRMATION_POLL_MS));
+  }
+}
 
 // Calculate swap amount using real-time exchange rate
 const calculateSwapAmount = async (fromToken: TokenSymbol, amount: number): Promise<number> => {
@@ -278,7 +314,7 @@ export const execute = async ({
 
     const { kit, helpers } = await solana();
     const { mintTo } = await import("../../utils/web3/token-minter");
-    const { rpc, rpcSubscriptions } = await helpers.getWorkingSolanaConnection();
+    const { rpc } = await helpers.getWorkingSolanaConnection();
 
     const transaction = kit
       .getTransactionDecoder()
@@ -303,12 +339,18 @@ export const execute = async ({
     }
 
     const signature = kit.getSignatureFromTransaction(transaction);
-    const sendAndConfirm = kit.sendAndConfirmTransactionFactory({ rpc, rpcSubscriptions });
-    // The message was built with a blockhash lifetime before it went to the
-    // wallet, and decoding preserves it; the send call rejects it otherwise.
-    await sendAndConfirm(transaction as Parameters<typeof sendAndConfirm>[0], {
+
+    // A transaction that came back from the wallet and was decoded carries no
+    // lifetime: lastValidBlockHeight is not part of the wire format, so it
+    // cannot survive the round trip. The blockhash confirmer dereferences it
+    // and throws *after* the transfer has already been sent, which takes the
+    // user's tokens and returns nothing. Confirming by signature needs no
+    // lifetime at all.
+    const sendTransaction = kit.sendTransactionWithoutConfirmingFactory({ rpc });
+    await sendTransaction(transaction as Parameters<typeof sendTransaction>[0], {
       commitment: "confirmed",
     });
+    await confirmSignature(rpc, signature);
     console.log("Transaction confirmed:", signature);
 
     const swapAmount = await calculateSwapAmount(fromToken, amount);
