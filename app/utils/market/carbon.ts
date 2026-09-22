@@ -43,3 +43,46 @@ export async function getLiveCarbonPriceEur(): Promise<number> {
 
   return price;
 }
+
+const ICAP_SYSTEMS =
+  "https://allowancepriceexplorer.icapcarbonaction.com/api/systems";
+
+// "European Union Emissions Trading System (from 2019)".
+const EU_ETS_SYSTEM_ID = 34;
+
+interface IcapSystem {
+  id: number;
+  values?: { secondary?: Record<string, number[]> };
+}
+
+// ICAP publishes the official EU ETS secondary-market price in EUR, but some
+// months in arrears, so it stands in only once the live quote is unavailable.
+export async function getOfficialCarbonPriceEur(): Promise<{
+  price: number;
+  asOf: string;
+}> {
+  const response = await fetch(ICAP_SYSTEMS, {
+    headers: { "User-Agent": USER_AGENT },
+  });
+
+  if (!response.ok) {
+    throw new Error(`ICAP lookup failed with ${response.status}`);
+  }
+
+  const systems = (await response.json()) as IcapSystem[];
+  const secondary = systems.find((s) => s.id === EU_ETS_SYSTEM_ID)?.values
+    ?.secondary;
+
+  if (!secondary) {
+    throw new Error("ICAP returned no EU ETS secondary series");
+  }
+
+  const asOf = Object.keys(secondary).sort().pop();
+  const price = asOf ? secondary[asOf]?.[0] : undefined;
+
+  if (!asOf || typeof price !== "number") {
+    throw new Error("ICAP returned no usable EU ETS price");
+  }
+
+  return { price, asOf };
+}

@@ -35,6 +35,22 @@ async function getExchangeRate(): Promise<number> {
       return cachedRate.price;
     }
 
+    // Nothing live and nothing cached, so fall back to the official EU ETS
+    // price. It lags by months, but it is a real allowance price rather than
+    // a number we made up.
+    try {
+      const { getOfficialCarbonPriceEur } = await import(
+        "../../utils/market/carbon"
+      );
+      const { price, asOf } = await getOfficialCarbonPriceEur();
+      console.warn(
+        `Serving the OFFICIAL EU ETS exchange rate of ${price} as of ${asOf}`,
+      );
+      return price;
+    } catch (fallbackError) {
+      console.error("Error fetching official exchange rate:", fallbackError);
+    }
+
     const seeded = Number(process.env.EUA_EUR_FALLBACK_PRICE) || FALLBACK_RATE;
     console.warn(
       `Serving a PLACEHOLDER exchange rate of ${seeded}; no live price has been fetched yet`,
