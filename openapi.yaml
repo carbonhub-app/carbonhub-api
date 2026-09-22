@@ -57,7 +57,6 @@ components:
       required:
         - signedTransaction
         - fromToken
-        - amount
       properties:
         signedTransaction:
           type: string
@@ -65,10 +64,9 @@ components:
         fromToken:
           type: string
           enum: [ECFCH, EURCH]
-          description: Token that was swapped from
-        amount:
-          type: number
-          description: Amount that was swapped
+          description: >-
+            Token that was swapped from. The amount is read from the transfer
+            instruction inside the signed transaction, not from this request.
     SwapBalanceResponse:
       type: object
       properties:

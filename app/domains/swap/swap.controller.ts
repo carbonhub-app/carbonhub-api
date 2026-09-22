@@ -4,7 +4,7 @@ import type { Envelope, SetContext } from "../../types/http";
 import { asBody, badRequest } from "../../types/http";
 import { TOKEN_DECIMALS, type TokenSymbol } from "../../utils/web3/solana";
 import type { SolanaRpc } from "../../utils/web3/solana";
-import type { Signature } from "@solana/kit";
+import type { ReadonlyUint8Array, Signature } from "@solana/kit";
 
 // The carbon price moves slowly, so a short cache is plenty fresh and keeps
 // the trading page's polling well clear of Capital.com's rate limit.
@@ -78,6 +78,47 @@ async function solana() {
 }
 
 const unit = (symbol: TokenSymbol) => 10 ** TOKEN_DECIMALS[symbol];
+
+/**
+ * The amount the signed transaction actually moves into Carbonhub's account for
+ * `fromToken`, or null when it carries no such transfer.
+ */
+async function verifiedTransferAmount(
+  transaction: Readonly<{ messageBytes: ReadonlyUint8Array }>,
+  feePayer: string,
+  fromToken: TokenSymbol,
+): Promise<bigint | null> {
+  const { kit, token, helpers } = await solana();
+
+  const compiled = kit.getCompiledTransactionMessageDecoder().decode(transaction.messageBytes);
+  const message = kit.decompileTransactionMessage(compiled);
+
+  const transfers = message.instructions.filter(
+    (instruction) =>
+      instruction.programAddress === token.TOKEN_PROGRAM_ADDRESS &&
+      instruction.data?.[0] === token.TRANSFER_DISCRIMINATOR,
+  );
+  if (transfers.length !== 1) return null;
+
+  const parsed = token.parseTransferInstruction(
+    transfers[0] as Parameters<typeof token.parseTransferInstruction>[0],
+  );
+
+  const carbonhub = await helpers.carbonhubSigner();
+  const [expectedDestination] = await token.findAssociatedTokenPda({
+    mint: helpers.tokenMint(fromToken),
+    owner: carbonhub.address,
+    tokenProgram: token.TOKEN_PROGRAM_ADDRESS,
+  });
+
+  // Checking the destination is what makes the caller's `fromToken`
+  // self-verifying: naming the other token derives a different account than the
+  // one the wallet signed for.
+  if (parsed.accounts.destination.address !== expectedDestination) return null;
+  if (parsed.accounts.authority.address !== feePayer) return null;
+
+  return parsed.data.amount;
+}
 
 /**
  * Waits for a sent transaction to reach `confirmed` by asking the chain for its
@@ -286,7 +327,6 @@ export const create = async ({
 interface ExecuteBody {
   signedTransaction?: string;
   fromToken?: TokenSymbol;
-  amount?: number;
 }
 
 export const execute = async ({
@@ -297,13 +337,12 @@ export const execute = async ({
   set: SetContext;
 }): Promise<Envelope> => {
   try {
-    const { signedTransaction, fromToken, amount } = asBody<ExecuteBody>(body);
+    const { signedTransaction, fromToken } = asBody<ExecuteBody>(body);
 
-    if (!signedTransaction || !fromToken || !amount) {
+    if (!signedTransaction || !fromToken) {
       const invalidItems: string[] = [];
       if (!signedTransaction) invalidItems.push('"signedTransaction"');
       if (!fromToken) invalidItems.push('"fromToken"');
-      if (!amount) invalidItems.push('"amount"');
       set.status = 400;
       return {
         status: "error",
@@ -312,7 +351,7 @@ export const execute = async ({
       };
     }
 
-    const { kit, helpers } = await solana();
+    const { kit, token, helpers } = await solana();
     const { mintTo } = await import("../../utils/web3/token-minter");
     const { rpc } = await helpers.getWorkingSolanaConnection();
 
@@ -326,7 +365,6 @@ export const execute = async ({
       feePayer,
       signers: Object.keys(signatures).length,
       fromToken,
-      amount,
     });
 
     if (!feePayer || signatures[feePayer] == null) {
@@ -337,6 +375,22 @@ export const execute = async ({
         data: {},
       };
     }
+
+    // What gets minted has to follow from what the signed transaction actually
+    // moves. Taking the amount from the request body instead would let any
+    // caller transfer a token dust and claim a swap of any size.
+    const transferred = await verifiedTransferAmount(transaction, feePayer, fromToken);
+    if (transferred === null) {
+      set.status = 400;
+      return {
+        status: "error",
+        message: "Transaction does not contain a matching transfer to Carbonhub",
+        data: {},
+      };
+    }
+
+    const amount = Number(transferred) / unit(fromToken);
+    console.log("Verified transfer amount:", { fromToken, amount });
 
     const signature = kit.getSignatureFromTransaction(transaction);
 
