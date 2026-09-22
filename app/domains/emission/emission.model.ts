@@ -27,6 +27,13 @@ export interface EmissionReport {
   time: Date;
 }
 
+export interface MeasurementDocument extends mongoose.Document {
+  company: mongoose.Types.ObjectId;
+  time: Date;
+  ppm: number;
+  ton: number;
+}
+
 export interface CompanyDocument extends mongoose.Document {
   publicKey?: string;
   name: string;
@@ -81,4 +88,17 @@ const companySchema = new mongoose.Schema<CompanyDocument>({
 
 const Company = mongoose.model<CompanyDocument>("Company", companySchema);
 
-export { Company };
+// One row per reading, so a replayed batch is rejected by the unique index
+// instead of being added on top of the totals it already produced.
+const measurementSchema = new mongoose.Schema<MeasurementDocument>({
+  company: { type: mongoose.Schema.Types.ObjectId, ref: "Company", required: true },
+  time: { type: Date, required: true },
+  ppm: { type: Number, required: true },
+  ton: { type: Number, required: true },
+});
+
+measurementSchema.index({ company: 1, time: 1 }, { unique: true });
+
+const Measurement = mongoose.model<MeasurementDocument>("Measurement", measurementSchema);
+
+export { Company, Measurement };

@@ -1,4 +1,4 @@
-import { Company } from "./emission.model";
+import { Company, Measurement } from "./emission.model";
 import type { CompanyDocument } from "./emission.model";
 import { currentUser } from "../../middlewares/auth/jwt/jwt.verify";
 import type { VerificationResult } from "../../utils/auth/jwt/verify";
@@ -101,6 +101,28 @@ export const collect = async ({
     const date = `${month}-${("0" + d.getUTCDate().toString()).slice(-2)}`;
 
     const emissionTon = ppmToTons(ppm);
+
+    // Record the reading first. The totals below only ever accumulate, so a
+    // replayed batch would silently double them; the unique index on
+    // (company, time) is what makes a repeat detectable at all.
+    try {
+      await Measurement.create({
+        company: getCompany._id,
+        time: d,
+        ppm,
+        ton: emissionTon,
+      });
+    } catch (err) {
+      if ((err as { code?: number }).code === 11000) {
+        set.status = 409;
+        return {
+          status: "error",
+          message: "Measurement already recorded for this timestamp",
+          data: {},
+        };
+      }
+      throw err;
+    }
 
     const annualEntry = getCompany.emissions.annual.find((e) => e.year === year);
     if (annualEntry) {
