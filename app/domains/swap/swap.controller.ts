@@ -1,3 +1,4 @@
+import { SwapExecution } from "./swap.model";
 import { currentUser } from "../../middlewares/auth/jwt/jwt.verify";
 import type { VerificationResult } from "../../utils/auth/jwt/verify";
 import type { Envelope, SetContext } from "../../types/http";
@@ -424,12 +425,39 @@ export const execute = async ({
     await confirmSignature(rpc, signature);
     console.log("Transaction confirmed:", signature);
 
+    // Claim the signature before paying anything out. Two requests carrying the
+    // same signed transaction can both get it onto the network and both reach
+    // this point, and only the unique index stops the second one minting again.
+    try {
+      await SwapExecution.create({ signature, publicKey: feePayer, fromToken, amount });
+    } catch (err) {
+      if ((err as { code?: number }).code !== 11000) throw err;
+
+      const executed = await SwapExecution.findOne({ signature });
+      if (executed?.mintResult) {
+        set.status = 200;
+        return {
+          status: "success",
+          message: "Swap already executed",
+          data: { signature, mintResult: executed.mintResult },
+        };
+      }
+
+      set.status = 409;
+      return {
+        status: "error",
+        message: "This swap is already being executed",
+        data: {},
+      };
+    }
+
     const swapAmount = await calculateSwapAmount(fromToken, amount);
     const mintResult = await mintTo(
       fromToken === "ECFCH" ? "EURCH" : "ECFCH",
       feePayer,
       swapAmount,
     );
+    await SwapExecution.updateOne({ signature }, { mintResult });
 
     set.status = 200;
     return {
