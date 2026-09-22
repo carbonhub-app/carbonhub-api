@@ -236,14 +236,27 @@ export const create = async ({
     }
 
     console.log("User token account balance:", userTokenAccount.data.amount.toString());
-    const requiredAmount = amount * unit(fromToken);
-    if (userTokenAccount.data.amount < BigInt(requiredAmount)) {
+
+    // A transfer moves whole base units, and the requested amount routinely is
+    // not one: selling a round number of EURCH prices out to a fraction of an
+    // ECFCH. Rounding is also what keeps BigInt() from throwing on it.
+    const transferAmount = BigInt(Math.round(amount * unit(fromToken)));
+    if (transferAmount <= 0n) {
+      set.status = 400;
+      return {
+        status: "error",
+        message: `Amount is smaller than the smallest unit of ${fromToken}`,
+        data: {},
+      };
+    }
+
+    if (userTokenAccount.data.amount < transferAmount) {
       set.status = 400;
       return {
         status: "error",
         message: "Insufficient token balance",
         data: {
-          required: requiredAmount,
+          required: transferAmount.toString(),
           available: userTokenAccount.data.amount.toString(),
         },
       };
@@ -258,8 +271,12 @@ export const create = async ({
         : "Carbonhub token account exists",
     );
 
-    const swapAmount = await calculateSwapAmount(fromToken, amount);
-    const transferAmount = amount * unit(fromToken);
+    // Quote the payout against what actually transfers rather than the
+    // unrounded request, so the two cannot disagree.
+    const swapAmount = await calculateSwapAmount(
+      fromToken,
+      Number(transferAmount) / unit(fromToken),
+    );
 
     if (needsCarbonhubAccount) console.log("Adding create Carbonhub account instruction");
     const createAtaInstructions = needsCarbonhubAccount
@@ -276,13 +293,13 @@ export const create = async ({
     console.log("Adding transfer instruction:", {
       from: userFromTokenAddress,
       to: carbonhubFromTokenAddress,
-      amount: transferAmount,
+      amount: transferAmount.toString(),
     });
     const transferInstruction = token.getTransferInstruction({
       source: userFromTokenAddress,
       destination: carbonhubFromTokenAddress,
       authority: userAddress,
-      amount: BigInt(transferAmount),
+      amount: transferAmount,
     });
 
     const { value: latestBlockhash } = await rpc.getLatestBlockhash().send();
