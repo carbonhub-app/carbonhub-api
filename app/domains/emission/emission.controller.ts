@@ -8,7 +8,13 @@ import { asBody, badRequest } from "../../types/http";
 const CO2_MOLAR_MASS = 44; // g/mol
 const AIR_MOLAR_MASS = 29; // g/mol
 const AIR_DENSITY = 1.2; // kg/m3
-const AIR_VOLUME = 0.5 ** 3; // m3
+
+// Air passing the sensor over the interval one reading covers, i.e. the
+// site's ventilation throughput. This was the sensor's own 0.125 m3 sample
+// box, which measures the CO2 sitting in that box rather than anything the
+// site emitted, and put a full year of readings four orders of magnitude
+// below the annual quota they are checked against.
+const AIR_VOLUME = Number(process.env.AIR_VOLUME_M3) || 2.2e6; // m3 per reading
 
 const DEFAULT_ANNUAL_CARBON_EMISSION_QUOTA = 1000;
 
