@@ -11,15 +11,15 @@ const FALLBACK_RATE = 80;
 
 let cachedRate: { price: number; at: number } | null = null;
 
-// Helper to get exchange rate from Capital.com
+// Helper to get exchange rate from the carbon market
 async function getExchangeRate(): Promise<number> {
   if (cachedRate && Date.now() - cachedRate.at < RATE_TTL_MS) {
     return cachedRate.price;
   }
 
   try {
-    const { getCarbonPriceEur } = await import("../../utils/market/capital");
-    const price = await getCarbonPriceEur();
+    const { getLiveCarbonPriceEur } = await import("../../utils/market/carbon");
+    const price = await getLiveCarbonPriceEur();
     cachedRate = { price, at: Date.now() };
     return price;
   } catch (error) {
